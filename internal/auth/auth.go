@@ -31,113 +31,108 @@ type Claims struct {
 type Authenticator struct {
 	db        *sql.DB
 	alg       string
-	secret    []byte
 	publicKey any
 	issuer    string
 	audience  string
+	clockSkew time.Duration
 }
 
 func New(cfg config.Config, db *sql.DB) (*Authenticator, error) {
-	a := &Authenticator{
-		db:       db,
-		alg:      strings.ToUpper(cfg.AuthJWTAlg),
-		secret:   []byte(cfg.AuthJWTSecret),
-		issuer:   cfg.AuthJWTIssuer,
-		audience: cfg.AuthJWTAudience,
+	alg := strings.ToUpper(strings.TrimSpace(cfg.AuthJWTAlgorithm))
+	if alg != "RS256" {
+		return nil, fmt.Errorf("AUTH_JWT_ALGORITHM must be RS256")
 	}
 
-	switch a.alg {
-	case "HS256", "HS384", "HS512":
-		if len(a.secret) == 0 {
-			return nil, fmt.Errorf("AUTH_JWT_SECRET is required for %s", a.alg)
-		}
-	case "RS256", "RS384", "RS512", "ES256", "ES384", "ES512":
-		if cfg.AuthJWTPublicKeyPath == "" {
-			return nil, fmt.Errorf("AUTH_JWT_PUBLIC_KEY_PATH is required for %s", a.alg)
-		}
-		pub, err := loadPublicKey(cfg.AuthJWTPublicKeyPath)
-		if err != nil {
-			return nil, err
-		}
-		a.publicKey = pub
-	default:
-		return nil, fmt.Errorf("unsupported AUTH_JWT_ALG: %s", cfg.AuthJWTAlg)
+	pub, err := loadPublicKey(cfg.AuthJWTPublicKeyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	a := &Authenticator{
+		db:        db,
+		alg:       alg,
+		publicKey: pub,
+		issuer:    cfg.AuthJWTIssuer,
+		audience:  cfg.AuthJWTAudience,
+		clockSkew: time.Duration(cfg.AuthJWTClockSkew) * time.Second,
 	}
 
 	return a, nil
 }
 
 func (a *Authenticator) Authenticate(ctx context.Context, tokenString string) (Identity, error) {
-	if strings.TrimSpace(tokenString) == "" {
-		return Identity{}, NewError("AUTH_TOKEN_REQUIRED", "Access token is required.", nil)
-	}
-
 	claims := &Claims{}
 	parser := jwt.NewParser(jwt.WithValidMethods([]string{a.alg}))
 	keyfunc := func(token *jwt.Token) (any, error) {
 		if token.Method.Alg() != a.alg {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
-		switch a.alg {
-		case "HS256", "HS384", "HS512":
-			return a.secret, nil
-		default:
-			return a.publicKey, nil
-		}
+		return a.publicKey, nil
 	}
 
 	_, err := parser.ParseWithClaims(tokenString, claims, keyfunc)
 	if err != nil {
-		switch {
-		case errors.Is(err, jwt.ErrTokenExpired):
-			return Identity{}, NewError("AUTH_TOKEN_EXPIRED", "Access token expired.", err)
-		default:
-			return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", err)
-		}
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 	}
 
 	now := time.Now().UTC()
-	if claims.ExpiresAt == nil || !claims.ExpiresAt.After(now) {
-		return Identity{}, NewError("AUTH_TOKEN_EXPIRED", "Access token expired.", nil)
+	if claims.Subject == "" {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
 	}
-	if a.issuer != "" && claims.Issuer != a.issuer {
-		return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", nil)
+	if claims.ExpiresAt == nil || claims.IssuedAt == nil {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
 	}
-	if a.audience != "" && !contains(claims.Audience, a.audience) {
-		return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", nil)
+	if claims.Issuer != a.issuer {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+	}
+	if len(claims.Audience) != 1 || claims.Audience[0] != a.audience {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+	}
+	issuedAt := claims.IssuedAt.Time.UTC().Unix()
+	tokenExpiresAt := claims.ExpiresAt.Time.UTC().Unix()
+	nowUnix := now.Unix()
+	skew := int64(a.clockSkew / time.Second)
+	if issuedAt > nowUnix+skew {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+	}
+	if tokenExpiresAt <= nowUnix-skew {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+	}
+	if tokenExpiresAt <= issuedAt {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+	}
+	if strings.TrimSpace(claims.SID) == "" {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
 	}
 
 	userID, err := parseUint(claims.Subject)
 	if err != nil || userID == 0 {
-		return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", err)
-	}
-	if strings.TrimSpace(claims.SID) == "" {
-		return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 	}
 
 	var sessionUserID uint64
 	var revokedAt sql.NullTime
-	var expiresAt time.Time
+	var sessionExpiresAt time.Time
 	err = a.db.QueryRowContext(ctx, `
 		SELECT user_id, expires_at, revoked_at
 		FROM user_sessions
 		WHERE id = ?
 		LIMIT 1
-	`, claims.SID).Scan(&sessionUserID, &expiresAt, &revokedAt)
+	`, claims.SID).Scan(&sessionUserID, &sessionExpiresAt, &revokedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Identity{}, NewError("AUTH_SESSION_NOT_FOUND", "Session not found.", err)
+			return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 		}
-		return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", err)
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 	}
 	if revokedAt.Valid {
-		return Identity{}, NewError("AUTH_SESSION_REVOKED", "Session revoked.", nil)
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
 	}
-	if !expiresAt.After(now) {
-		return Identity{}, NewError("AUTH_TOKEN_EXPIRED", "Access token expired.", nil)
+	if !sessionExpiresAt.After(now) {
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
 	}
 	if sessionUserID != userID {
-		return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
 	}
 
 	var userStatus string
@@ -149,12 +144,12 @@ func (a *Authenticator) Authenticate(ctx context.Context, tokenString string) (I
 	`, userID).Scan(&userStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Identity{}, NewError("AUTH_USER_NOT_FOUND", "User not found.", err)
+			return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 		}
-		return Identity{}, NewError("AUTH_TOKEN_INVALID", "Access token is invalid.", err)
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 	}
 	if strings.ToLower(userStatus) != "active" {
-		return Identity{}, NewError("AUTH_USER_BLOCKED", "User is blocked.", nil)
+		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
 	}
 
 	return Identity{UserID: userID, SessionID: claims.SID}, nil
@@ -183,15 +178,6 @@ func loadPublicKey(path string) (any, error) {
 		return rsaPub, nil
 	}
 	return nil, err
-}
-
-func contains(values []string, target string) bool {
-	for _, v := range values {
-		if v == target {
-			return true
-		}
-	}
-	return false
 }
 
 func parseUint(v string) (uint64, error) {

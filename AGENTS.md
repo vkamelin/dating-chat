@@ -50,7 +50,7 @@
 
 - `cd dating-chat && go mod tidy`
 - `cd dating-chat && go build -o meet-you-chat ./cmd/chat`
-- `cd dating-chat && HTTP_ADDR=:8080 MYSQL_DSN='...' REDIS_ADDR=127.0.0.1:6379 AUTH_JWT_ALG=HS256 AUTH_JWT_SECRET='...' ./meet-you-chat`
+- `cd dating-chat && HTTP_ADDR=:8080 MYSQL_DSN='...' REDIS_ADDR=127.0.0.1:6379 AUTH_JWT_ALGORITHM=RS256 AUTH_JWT_PUBLIC_KEY_PATH='...' AUTH_JWT_ISSUER='...' AUTH_JWT_AUDIENCE='...' ./meet-you-chat`
 
 ## Key references
 
@@ -58,4 +58,3 @@
 - `../README.md`
 - `../geo.md`
 - `../flutter_mobile_authentication.md`
-

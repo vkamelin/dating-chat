@@ -1,0 +1,454 @@
+openapi: 3.1.0
+info:
+  title: Meet You Chat WebSocket API
+  version: 1.0.0
+  description: |
+    OpenAPI snapshot for the standalone realtime chat service.
+    The service exposes two HTTP health endpoints plus a WebSocket upgrade endpoint at `GET /ws`.
+    The message protocol after upgrade is documented in component schemas and the `x-websocket-events` extension.
+servers:
+  - url: http://localhost:8080
+    description: Local development server.
+  - url: wss://ws.meet-you.ru
+    description: Production WebSocket endpoint.
+tags:
+  - name: Health
+    description: Process health and dependency readiness checks.
+  - name: Realtime
+    description: WebSocket upgrade and chat transport protocol.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Check whether the process is alive
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      tags: [Health]
+      summary: Check readiness against MySQL and Redis
+      operationId: getReady
+      responses:
+        '200':
+          description: Dependencies are reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: At least one dependency is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotReadyResponse'
+  /ws:
+    get:
+      tags: [Realtime]
+      summary: Upgrade the connection to a chat WebSocket
+      description: |
+        Upgrades the HTTP connection to WebSocket and starts the realtime chat protocol.
+
+        Authentication is accepted via:
+        - `Authorization: Bearer <access_token>`
+
+        The WebSocket protocol is message-based. Client frames must be text frames with a JSON object
+        containing a `type` field. Server frames follow the schemas documented under
+        `components/schemas` and `x-websocket-events`.
+      operationId: upgradeWebSocket
+      security:
+        - bearerAuth: []
+      responses:
+        '101':
+          description: WebSocket connection established.
+        '401':
+          description: Access token is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HttpErrorResponse'
+        '500':
+          description: WebSocket upgrade or authentication setup failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HttpErrorResponse'
+x-websocket-events:
+  client:
+    - $ref: '#/components/schemas/PingMessage'
+    - $ref: '#/components/schemas/SendChatMessage'
+    - $ref: '#/components/schemas/MarkChatRead'
+  server:
+    - $ref: '#/components/schemas/PongMessage'
+    - $ref: '#/components/schemas/ChatMessageSentEvent'
+    - $ref: '#/components/schemas/ChatMessageCreatedEvent'
+    - $ref: '#/components/schemas/ChatMessageUpdatedEvent'
+    - $ref: '#/components/schemas/ChatReadOkEvent'
+    - $ref: '#/components/schemas/ChatReadUpdatedEvent'
+    - $ref: '#/components/schemas/ChatStatusChangedEvent'
+    - $ref: '#/components/schemas/WsErrorEvent'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token for the current session.
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+      additionalProperties: false
+    ReadyResponse:
+      type: object
+      required: [status, checked_at]
+      properties:
+        status:
+          type: string
+          const: ready
+        checked_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    NotReadyResponse:
+      type: object
+      required: [status, mysql, redis]
+      properties:
+        status:
+          type: string
+          const: not_ready
+        mysql:
+          type: string
+        redis:
+          type: string
+      additionalProperties: false
+    HttpErrorResponse:
+      type: object
+      required: [type, error]
+      properties:
+        type:
+          type: string
+          const: error
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          additionalProperties: false
+      additionalProperties: false
+    WsErrorEvent:
+      type: object
+      required: [type, request_id, error]
+      properties:
+        type:
+          type: string
+          const: error
+        request_id:
+          type: string
+          description: Correlates the error with the client request, when available.
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          additionalProperties: false
+      additionalProperties: false
+      examples:
+        - type: error
+          request_id: 3bb2e3ff-ff4f-4d0b-8f8b-7b5f4a9a0d41
+          error:
+            code: CHAT_ACCESS_DENIED
+            message: Access denied.
+    PingMessage:
+      type: object
+      required: [type, request_id]
+      properties:
+        type:
+          type: string
+          const: ping
+        request_id:
+          type: string
+          description: Client-generated request correlation id.
+      additionalProperties: false
+      examples:
+        - type: ping
+          request_id: 3bb2e3ff-ff4f-4d0b-8f8b-7b5f4a9a0d41
+    PongMessage:
+      type: object
+      required: [type, request_id]
+      properties:
+        type:
+          type: string
+          const: pong
+        request_id:
+          type: string
+      additionalProperties: false
+      examples:
+        - type: pong
+          request_id: 3bb2e3ff-ff4f-4d0b-8f8b-7b5f4a9a0d41
+    SendChatMessage:
+      type: object
+      required: [type, request_id, chat_id, client_message_id, body]
+      properties:
+        type:
+          type: string
+          const: chat.message.send
+        request_id:
+          type: string
+        chat_id:
+          type: integer
+          format: int64
+          minimum: 1
+        client_message_id:
+          type: string
+          description: Client-generated message id used for idempotency.
+        body:
+          type: string
+          minLength: 1
+          description: Message text after trimming whitespace.
+      additionalProperties: false
+      examples:
+        - type: chat.message.send
+          request_id: 3bb2e3ff-ff4f-4d0b-8f8b-7b5f4a9a0d41
+          chat_id: 10
+          client_message_id: 0cd2f4b2-2e72-43b6-a605-6d3e3a8f58be
+          body: Привет
+    MarkChatRead:
+      type: object
+      required: [type, request_id, chat_id, last_read_message_id]
+      properties:
+        type:
+          type: string
+          const: chat.read
+        request_id:
+          type: string
+        chat_id:
+          type: integer
+          format: int64
+          minimum: 1
+        last_read_message_id:
+          type: integer
+          format: int64
+          minimum: 1
+      additionalProperties: false
+      examples:
+        - type: chat.read
+          request_id: 3bb2e3ff-ff4f-4d0b-8f8b-7b5f4a9a0d41
+          chat_id: 10
+          last_read_message_id: 1001
+    ChatReadOkEvent:
+      type: object
+      required: [type, request_id, chat_id, last_read_message_id, read_at]
+      properties:
+        type:
+          type: string
+          const: chat.read.ok
+        request_id:
+          type: string
+        chat_id:
+          type: integer
+          format: int64
+          minimum: 1
+        last_read_message_id:
+          type: integer
+          format: int64
+          minimum: 1
+        read_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+      examples:
+        - type: chat.read.ok
+          request_id: 3bb2e3ff-ff4f-4d0b-8f8b-7b5f4a9a0d41
+          chat_id: 10
+          last_read_message_id: 1001
+          read_at: '2026-07-01T10:00:05Z'
+    ChatReadUpdatedEvent:
+      type: object
+      required: [type, chat_id, user_id, last_read_message_id, read_at]
+      properties:
+        type:
+          type: string
+          const: chat.read.updated
+        chat_id:
+          type: integer
+          format: int64
+          minimum: 1
+        user_id:
+          type: integer
+          format: int64
+          minimum: 1
+        last_read_message_id:
+          type: integer
+          format: int64
+          minimum: 1
+        read_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+      examples:
+        - type: chat.read.updated
+          chat_id: 10
+          user_id: 123
+          last_read_message_id: 1001
+          read_at: '2026-07-01T10:00:05Z'
+    ChatMessageButton:
+      type: object
+      required: [key, label, action_type, is_enabled]
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        action_type:
+          type: string
+        style:
+          type: [string, 'null']
+          description: Optional visual style hint from the database.
+        is_enabled:
+          type: boolean
+      additionalProperties: false
+    ChatMessage:
+      type: object
+      required: [id, chat_id, sequence_number, message_type, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        chat_id:
+          type: integer
+          format: int64
+          minimum: 1
+        sequence_number:
+          type: integer
+          format: int64
+          minimum: 0
+        message_type:
+          type: string
+          description: Message category stored in `chat_messages.message_type`.
+        system_type:
+          type: [string, 'null']
+          description: System message subtype, if present.
+        sender_user_id:
+          type: [integer, 'null']
+          format: int64
+          minimum: 1
+        client_message_id:
+          type: [string, 'null']
+          description: Client message id for idempotent user messages.
+        body:
+          type: [string, 'null']
+          description: Message body text, if present.
+        payload:
+          description: Raw JSON payload copied from the database for system messages.
+        buttons:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessageButton'
+        created_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ChatMessageSentEvent:
+      type: object
+      required: [type, request_id, message]
+      properties:
+        type:
+          type: string
+          const: chat.message.sent
+        request_id:
+          type: string
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+      additionalProperties: false
+      examples:
+        - type: chat.message.sent
+          request_id: 3bb2e3ff-ff4f-4d0b-8f8b-7b5f4a9a0d41
+          message:
+            id: 1001
+            chat_id: 10
+            sequence_number: 55
+            message_type: user
+            system_type: null
+            sender_user_id: 123
+            client_message_id: 0cd2f4b2-2e72-43b6-a605-6d3e3a8f58be
+            body: Привет
+            created_at: '2026-07-01T10:00:00Z'
+    ChatMessageCreatedEvent:
+      type: object
+      required: [type, message]
+      properties:
+        type:
+          type: string
+          const: chat.message.created
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+      additionalProperties: false
+      examples:
+        - type: chat.message.created
+          message:
+            id: 1001
+            chat_id: 10
+            sequence_number: 55
+            message_type: user
+            system_type: null
+            sender_user_id: 123
+            body: Привет
+            created_at: '2026-07-01T10:00:00Z'
+    ChatMessageUpdatedEvent:
+      type: object
+      required: [type, message]
+      properties:
+        type:
+          type: string
+          const: chat.message.updated
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+      additionalProperties: false
+      examples:
+        - type: chat.message.updated
+          message:
+            id: 42
+            chat_id: 10
+            sequence_number: 0
+            message_type: system
+            system_type: chat_closing_warning_24h
+            sender_user_id: 123
+            body: Чат закроется через 24 часа.
+            buttons:
+              - key: confirm_date
+                label: Да, мы встречались
+                action_type: confirm_date
+                style: primary
+                is_enabled: true
+            created_at: '2026-07-01T10:00:00Z'
+    ChatStatusChangedEvent:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: chat.status.changed
+      additionalProperties: true
+      description: Raw passthrough event from the Redis stream. The service forwards the remaining fields without schema shaping.
+      examples:
+        - type: chat.status.changed
+          chat_id: 10
+          status: active
+          changed_at: '2026-07-01T10:00:00Z'

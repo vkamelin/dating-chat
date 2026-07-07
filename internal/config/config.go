@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -18,11 +19,11 @@ type Config struct {
 	RedisGroup     string
 	RedisConsumer  string
 
-	AuthJWTAlg           string
-	AuthJWTSecret        string
+	AuthJWTAlgorithm     string
 	AuthJWTPublicKeyPath string
 	AuthJWTIssuer        string
 	AuthJWTAudience      string
+	AuthJWTClockSkew     int
 
 	WSMaxMessageBytes      int64
 	WSPingIntervalSeconds   int
@@ -41,11 +42,11 @@ func Load() (Config, error) {
 		RedisStream:           getenv("CHAT_EVENTS_STREAM", "chat.events"),
 		RedisGroup:            getenv("CHAT_EVENTS_GROUP", "chat-ws"),
 		RedisConsumer:         getenv("CHAT_EVENTS_CONSUMER", "chat-ws-1"),
-		AuthJWTAlg:            getenv("AUTH_JWT_ALG", "HS256"),
-		AuthJWTSecret:         getenv("AUTH_JWT_SECRET", ""),
+		AuthJWTAlgorithm:      getenv("AUTH_JWT_ALGORITHM", getenv("AUTH_JWT_ALG", "")),
 		AuthJWTPublicKeyPath:  getenv("AUTH_JWT_PUBLIC_KEY_PATH", ""),
 		AuthJWTIssuer:         getenv("AUTH_JWT_ISSUER", ""),
 		AuthJWTAudience:       getenv("AUTH_JWT_AUDIENCE", ""),
+		AuthJWTClockSkew:      getenvInt("AUTH_JWT_CLOCK_SKEW", 30),
 		WSMaxMessageBytes:     getenvInt64("WS_MAX_MESSAGE_BYTES", 65536),
 		WSPingIntervalSeconds:  getenvInt("WS_PING_INTERVAL_SECONDS", 25),
 		WSPongTimeoutSeconds:   getenvInt("WS_PONG_TIMEOUT_SECONDS", 60),
@@ -67,6 +68,25 @@ func Load() (Config, error) {
 	}
 	if cfg.ChatMessageRatePerMin <= 0 {
 		return Config{}, fmt.Errorf("CHAT_MESSAGE_RATE_LIMIT_PER_MINUTE must be positive")
+	}
+	cfg.AuthJWTAlgorithm = strings.ToUpper(strings.TrimSpace(cfg.AuthJWTAlgorithm))
+	if cfg.AuthJWTAlgorithm == "" {
+		return Config{}, fmt.Errorf("AUTH_JWT_ALGORITHM is required")
+	}
+	if cfg.AuthJWTAlgorithm != "RS256" {
+		return Config{}, fmt.Errorf("AUTH_JWT_ALGORITHM must be RS256")
+	}
+	if cfg.AuthJWTPublicKeyPath == "" {
+		return Config{}, fmt.Errorf("AUTH_JWT_PUBLIC_KEY_PATH is required")
+	}
+	if cfg.AuthJWTIssuer == "" {
+		return Config{}, fmt.Errorf("AUTH_JWT_ISSUER is required")
+	}
+	if cfg.AuthJWTAudience == "" {
+		return Config{}, fmt.Errorf("AUTH_JWT_AUDIENCE is required")
+	}
+	if cfg.AuthJWTClockSkew < 0 {
+		return Config{}, fmt.Errorf("AUTH_JWT_CLOCK_SKEW must not be negative")
 	}
 	return cfg, nil
 }

@@ -42,12 +42,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	identity, err := h.auth.Authenticate(r.Context(), token)
 	if err != nil {
-		var ae *auth.Error
-		if errors.As(err, &ae) {
-			writeHTTPError(w, http.StatusUnauthorized, ae.Code, ae.Message)
-			return
-		}
-		writeHTTPError(w, http.StatusUnauthorized, "AUTH_TOKEN_INVALID", "Access token is invalid.")
+		writeHTTPError(w, http.StatusUnauthorized, "AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.")
 		return
 	}
 
@@ -73,17 +68,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) extractToken(r *http.Request) (string, string, string) {
-	header := r.Header.Get("Authorization")
-	if strings.HasPrefix(strings.ToLower(header), "bearer ") {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if header != "" && !strings.Contains(header, ",") && strings.HasPrefix(strings.ToLower(header), "bearer ") {
 		token := strings.TrimSpace(header[len("Bearer "):])
 		if token != "" {
 			return token, "", ""
 		}
 	}
-	if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" {
-		return token, "", ""
-	}
-	return "", "AUTH_TOKEN_REQUIRED", "Access token is required."
+	return "", "AUTH_ACCESS_TOKEN_REQUIRED", "Access token is required."
 }
 
 func (h *Handler) readLoop(ctx context.Context, client *Client, presenceKey string) {
@@ -251,11 +243,6 @@ func (h *Handler) sendServiceError(client *Client, requestID string, err error) 
 	var se *chat.ServiceError
 	if errors.As(err, &se) {
 		h.sendError(client, requestID, se.Code, se.Message)
-		return
-	}
-	var ae *auth.Error
-	if errors.As(err, &ae) {
-		h.sendError(client, requestID, ae.Code, ae.Message)
 		return
 	}
 	h.sendError(client, requestID, "CHAT_MESSAGE_SAVE_FAILED", "Failed to save message.")

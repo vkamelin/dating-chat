@@ -17,8 +17,10 @@ Set the required environment variables and run the binary:
 HTTP_ADDR=:8080 \
 MYSQL_DSN='user:password@tcp(127.0.0.1:3306)/dating?parseTime=true&charset=utf8mb4&loc=UTC' \
 REDIS_ADDR=127.0.0.1:6379 \
-AUTH_JWT_ALG=HS256 \
-AUTH_JWT_SECRET='your-secret' \
+AUTH_JWT_ALGORITHM=RS256 \
+AUTH_JWT_PUBLIC_KEY_PATH='/opt/meet-you-chat/jwt-public.pem' \
+AUTH_JWT_ISSUER='https://api.meet-you.ru' \
+AUTH_JWT_AUDIENCE='mobile-app' \
 ./meet-you-chat
 ```
 
@@ -35,11 +37,11 @@ REDIS_ADDR=127.0.0.1:6379
 REDIS_PASSWORD=
 REDIS_DB=0
 
-AUTH_JWT_ALG=HS256
-AUTH_JWT_SECRET=
+AUTH_JWT_ALGORITHM=RS256
 AUTH_JWT_PUBLIC_KEY_PATH=
 AUTH_JWT_ISSUER=
 AUTH_JWT_AUDIENCE=
+AUTH_JWT_CLOCK_SKEW=30
 
 CHAT_EVENTS_STREAM=chat.events
 CHAT_EVENTS_GROUP=chat-ws
@@ -53,7 +55,7 @@ CHAT_MESSAGE_MAX_LENGTH=4000
 CHAT_MESSAGE_RATE_LIMIT_PER_MINUTE=60
 ```
 
-`AUTH_JWT_ALG` supports HMAC algorithms such as `HS256` and asymmetric algorithms such as `RS256` when `AUTH_JWT_PUBLIC_KEY_PATH` is set.
+`AUTH_JWT_ALGORITHM` must be `RS256`. The chat service validates tokens with the same issuer, audience, signature, subject, session, and expiry rules as the API.
 
 ## HTTP Endpoints
 
@@ -69,23 +71,16 @@ Send the access token in the `Authorization` header:
 Authorization: Bearer <access_token>
 ```
 
-Or as a query parameter:
-
-```text
-/ws?access_token=<access_token>
-```
-
-If both are present, the `Authorization` header wins.
-
 The token must be a JWT with `sub` and `sid` claims. The service verifies:
 
 1. JWT signature.
 2. Expiration.
-3. Optional issuer.
-4. Optional audience.
-5. Session existence in `user_sessions`.
-6. Session revocation and expiration.
-7. User existence and `active` status.
+3. Issuer match.
+4. Audience match.
+5. `iat` and `exp` validity with clock skew.
+6. Session existence in `user_sessions`.
+7. Session revocation and expiration.
+8. User existence and `active` status.
 
 ## WebSocket Protocol
 
@@ -291,10 +286,12 @@ RestartSec=3
 Environment=HTTP_ADDR=:8080
 Environment=MYSQL_DSN=user:password@tcp(127.0.0.1:3306)/dating?parseTime=true&charset=utf8mb4&loc=UTC
 Environment=REDIS_ADDR=127.0.0.1:6379
-Environment=AUTH_JWT_ALG=HS256
-Environment=AUTH_JWT_SECRET=change-me
+Environment=AUTH_JWT_ALGORITHM=RS256
+Environment=AUTH_JWT_PUBLIC_KEY_PATH=/opt/meet-you-chat/jwt-public.pem
+Environment=AUTH_JWT_ISSUER=https://api.meet-you.ru
+Environment=AUTH_JWT_AUDIENCE=mobile-app
+Environment=AUTH_JWT_CLOCK_SKEW=30
 
 [Install]
 WantedBy=multi-user.target
 ```
-
