@@ -40,6 +40,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	identity, err := h.auth.Authenticate(r.Context(), token)
 	if err != nil {
+		reason := "claims or account state validation failed"
+		var authErr *auth.Error
+		if errors.As(err, &authErr) && authErr.Err != nil {
+			reason = authErr.Err.Error()
+		}
+		h.logger.Warn("websocket authentication rejected", "reason", reason)
 		writeHTTPError(w, http.StatusUnauthorized, "AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.")
 		return
 	}
