@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -39,9 +40,9 @@ func Load() (Config, error) {
 	cfg := Config{
 		HTTPAddr:              getenv("HTTP_ADDR", ":8080"),
 		MySQLDSN:              getenv("MYSQL_DSN", ""),
-		RedisAddr:             getenv("REDIS_ADDR", "127.0.0.1:6379"),
+		RedisAddr:             redisAddress(),
 		RedisPassword:         getenv("REDIS_PASSWORD", ""),
-		RedisDB:               getenvInt("REDIS_DB", 0),
+		RedisDB:               getenvInt("REDIS_DB", getenvInt("REDIS_DATABASE", 0)),
 		RedisStream:           getenv("CHAT_EVENTS_STREAM", "chat.events"),
 		RedisGroup:            getenv("CHAT_EVENTS_GROUP", "chat-ws"),
 		RedisConsumer:         getenv("CHAT_EVENTS_CONSUMER", "chat-ws-1"),
@@ -105,6 +106,16 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// redisAddress accepts the API's REDIS_HOST/REDIS_PORT names. REDIS_ADDR is
+// retained as an explicit override for existing WS deployments.
+func redisAddress() string {
+	if address := strings.TrimSpace(os.Getenv("REDIS_ADDR")); address != "" {
+		return address
+	}
+
+	return net.JoinHostPort(getenv("REDIS_HOST", "127.0.0.1"), getenv("REDIS_PORT", "6379"))
 }
 
 func getenvInt(key string, fallback int) int {

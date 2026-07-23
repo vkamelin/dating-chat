@@ -16,7 +16,9 @@ Set the required environment variables and run the binary:
 ```bash
 HTTP_ADDR=:8080 \
 MYSQL_DSN='user:password@tcp(127.0.0.1:3306)/dating?parseTime=true&charset=utf8mb4&loc=UTC' \
-REDIS_ADDR=127.0.0.1:6379 \
+REDIS_HOST=127.0.0.1 \
+REDIS_PORT=6379 \
+REDIS_DATABASE=0 \
 AUTH_JWT_ALGORITHM=RS256 \
 AUTH_JWT_PUBLIC_KEY_PATH='/opt/meet-you-chat/jwt-public.pem' \
 AUTH_JWT_ISSUER='https://api.meet-you.ru' \
@@ -33,9 +35,10 @@ HTTP_ADDR=:8080
 
 MYSQL_DSN=user:password@tcp(127.0.0.1:3306)/dating?parseTime=true&charset=utf8mb4&loc=UTC
 
-REDIS_ADDR=127.0.0.1:6379
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DATABASE=0
 REDIS_PASSWORD=
-REDIS_DB=0
 
 AUTH_JWT_ALGORITHM=RS256
 AUTH_JWT_PUBLIC_KEY_PATH=
@@ -58,6 +61,10 @@ PRESENCE_EVENTS_CHANNEL=chat.presence
 CHAT_MESSAGE_MAX_LENGTH=4000
 CHAT_MESSAGE_RATE_LIMIT_PER_MINUTE=60
 ```
+
+For backward compatibility, `REDIS_ADDR` overrides `REDIS_HOST`/`REDIS_PORT`
+when set, and `REDIS_DB` overrides `REDIS_DATABASE` when set. New deployments
+should use the API-compatible variable names above for both services.
 
 `AUTH_JWT_ALGORITHM` must be `RS256`. The chat service validates tokens with the same issuer, audience, signature, subject, session, and expiry rules as the API.
 
@@ -304,7 +311,9 @@ Restart=always
 RestartSec=3
 Environment=HTTP_ADDR=:8080
 Environment=MYSQL_DSN=user:password@tcp(127.0.0.1:3306)/dating?parseTime=true&charset=utf8mb4&loc=UTC
-Environment=REDIS_ADDR=127.0.0.1:6379
+Environment=REDIS_HOST=127.0.0.1
+Environment=REDIS_PORT=6379
+Environment=REDIS_DATABASE=0
 Environment=AUTH_JWT_ALGORITHM=RS256
 Environment=AUTH_JWT_PUBLIC_KEY_PATH=/opt/meet-you-chat/jwt-public.pem
 Environment=AUTH_JWT_ISSUER=https://api.meet-you.ru
