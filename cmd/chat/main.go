@@ -54,12 +54,13 @@ func main() {
 	hub := ws.NewHub(logger)
 	service := chat.NewService(cfg, repo, hub, logger)
 	consumer := events.NewConsumer(cfg, service, logger, redisClient)
+	presence := ws.NewPresence(cfg, redisClient, repo, hub, logger)
 
 	mux := http.NewServeMux()
 	health := httpx.NewHealthHandler(sqlDB, redisClient)
 	mux.HandleFunc("GET /health", health.Health)
 	mux.HandleFunc("GET /ready", health.Ready)
-	mux.HandleFunc("GET /ws", ws.NewHandler(cfg, authenticator, service, hub, redisClient, logger).ServeHTTP)
+	mux.HandleFunc("GET /ws", ws.NewHandler(cfg, authenticator, service, hub, presence, logger).ServeHTTP)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -73,6 +74,10 @@ func main() {
 	consumerErr := make(chan error, 1)
 	go func() {
 		consumerErr <- consumer.Run(ctx)
+	}()
+	presenceErr := make(chan error, 1)
+	go func() {
+		presenceErr <- presence.Run(ctx)
 	}()
 
 	serverErr := make(chan error, 1)
@@ -91,6 +96,11 @@ func main() {
 	case err := <-consumerErr:
 		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("redis consumer stopped", "error", err)
+		}
+		cancel()
+	case err := <-presenceErr:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("presence subscription stopped", "error", err)
 		}
 		cancel()
 	case err := <-serverErr:
@@ -126,6 +136,14 @@ func main() {
 	case err := <-serverErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server exit", "error", err)
+		}
+	default:
+	}
+
+	select {
+	case err := <-presenceErr:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("presence subscriber exit", "error", err)
 		}
 	default:
 	}

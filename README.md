@@ -51,6 +51,10 @@ WS_MAX_MESSAGE_BYTES=65536
 WS_PING_INTERVAL_SECONDS=25
 WS_PONG_TIMEOUT_SECONDS=60
 
+PRESENCE_TTL_SECONDS=90
+PRESENCE_HEARTBEAT_SECONDS=30
+PRESENCE_EVENTS_CHANNEL=chat.presence
+
 CHAT_MESSAGE_MAX_LENGTH=4000
 CHAT_MESSAGE_RATE_LIMIT_PER_MINUTE=60
 ```
@@ -83,6 +87,20 @@ The token must be a JWT with `sub` and `sid` claims. The service verifies:
 8. User existence and `active` status.
 
 ## WebSocket Protocol
+
+### Presence update
+
+The server sends this event to active chat partners when a user gains their
+first active connection or loses their last one:
+
+```json
+{
+  "type": "presence.updated",
+  "user_id": 42,
+  "is_online": true,
+  "updated_at": "2026-07-23T10:00:00Z"
+}
+```
 
 ### Send message
 
@@ -194,6 +212,7 @@ The service consumes `CHAT_EVENTS_STREAM` through consumer group `CHAT_EVENTS_GR
 * `chat.message.created`
 * `chat.message.updated`
 * `chat.read.updated`
+* `presence.updated`
 * `chat.status.changed`
 
 System messages are loaded from MySQL before delivery, and buttons are expanded from `chat_message_buttons` without exposing internal payloads.

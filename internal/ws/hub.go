@@ -158,6 +158,15 @@ func NewPongEvent(requestID string) map[string]any {
 	}
 }
 
+func NewPresenceUpdatedEvent(userID uint64, isOnline bool, updatedAt time.Time) map[string]any {
+	return map[string]any{
+		"type":       "presence.updated",
+		"user_id":    userID,
+		"is_online":  isOnline,
+		"updated_at": updatedAt.UTC(),
+	}
+}
+
 func NewChatMessageSentEvent(requestID string, msg *chatMessageDTO) map[string]any {
 	return map[string]any{
 		"type":       "chat.message.sent",

@@ -307,6 +307,28 @@ components:
           user_id: 123
           last_read_message_id: 1001
           read_at: '2026-07-01T10:00:05Z'
+    PresenceUpdatedEvent:
+      type: object
+      required: [type, user_id, is_online, updated_at]
+      properties:
+        type:
+          type: string
+          const: presence.updated
+        user_id:
+          type: integer
+          format: int64
+          minimum: 1
+        is_online:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+      examples:
+        - type: presence.updated
+          user_id: 42
+          is_online: true
+          updated_at: '2026-07-23T10:00:00Z'
     ChatMessageButton:
       type: object
       required: [key, label, action_type, is_enabled]

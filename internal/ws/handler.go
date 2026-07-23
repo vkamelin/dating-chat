@@ -8,11 +8,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"nhooyr.io/websocket"
 
 	"meet-you-chat/internal/auth"
@@ -21,16 +19,16 @@ import (
 )
 
 type Handler struct {
-	cfg    config.Config
-	auth   *auth.Authenticator
-	svc    *chat.Service
-	hub    *Hub
-	redis  *redis.Client
-	logger *slog.Logger
+	cfg      config.Config
+	auth     *auth.Authenticator
+	svc      *chat.Service
+	hub      *Hub
+	presence *Presence
+	logger   *slog.Logger
 }
 
-func NewHandler(cfg config.Config, authenticator *auth.Authenticator, svc *chat.Service, hub *Hub, redisClient *redis.Client, logger *slog.Logger) *Handler {
-	return &Handler{cfg: cfg, auth: authenticator, svc: svc, hub: hub, redis: redisClient, logger: logger}
+func NewHandler(cfg config.Config, authenticator *auth.Authenticator, svc *chat.Service, hub *Hub, presence *Presence, logger *slog.Logger) *Handler {
+	return &Handler{cfg: cfg, auth: authenticator, svc: svc, hub: hub, presence: presence, logger: logger}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -58,13 +56,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := NewClient(identity.UserID, identity.SessionID, connectionID, conn, cancel)
 	h.hub.Register(client)
 
-	presenceKey := "chat_online_user:" + strconv.FormatUint(identity.UserID, 10) + ":" + identity.SessionID + ":" + connectionID
 	connectedAt := time.Now().UTC()
-	h.refreshPresence(ctx, presenceKey, identity.UserID, identity.SessionID, connectedAt, connectedAt)
+	h.presence.Connect(ctx, identity.UserID, connectionID, connectedAt)
 
-	go h.presenceLoop(ctx, presenceKey, identity.UserID, identity.SessionID, connectedAt)
+	go h.presenceLoop(ctx, identity.UserID, connectionID)
 	go h.writeLoop(ctx, client)
-	h.readLoop(ctx, client, presenceKey)
+	h.readLoop(ctx, client)
 }
 
 func (h *Handler) extractToken(r *http.Request) (string, string, string) {
@@ -78,10 +75,10 @@ func (h *Handler) extractToken(r *http.Request) (string, string, string) {
 	return "", "AUTH_ACCESS_TOKEN_REQUIRED", "Access token is required."
 }
 
-func (h *Handler) readLoop(ctx context.Context, client *Client, presenceKey string) {
+func (h *Handler) readLoop(ctx context.Context, client *Client) {
 	defer func() {
 		h.hub.Unregister(client)
-		_ = h.redis.Del(context.Background(), presenceKey).Err()
+		h.presence.Disconnect(context.Background(), client.UserID, client.ConnectionID, time.Now().UTC())
 		_ = client.Conn.Close(websocket.StatusNormalClosure, "bye")
 		client.Cancel()
 	}()
@@ -200,31 +197,17 @@ func (h *Handler) writeLoop(ctx context.Context, client *Client) {
 	}
 }
 
-func (h *Handler) presenceLoop(ctx context.Context, key string, userID uint64, sessionID string, connectedAt time.Time) {
-	ticker := time.NewTicker(30 * time.Second)
+func (h *Handler) presenceLoop(ctx context.Context, userID uint64, connectionID string) {
+	ticker := time.NewTicker(time.Duration(h.cfg.PresenceHeartbeatSeconds) * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			h.refreshPresence(ctx, key, userID, sessionID, connectedAt, time.Now().UTC())
+			h.presence.Refresh(ctx, userID, connectionID, time.Now().UTC())
 		case <-ctx.Done():
 			return
 		}
 	}
-}
-
-func (h *Handler) refreshPresence(ctx context.Context, key string, userID uint64, sessionID string, connectedAt, lastSeenAt time.Time) {
-	payload := map[string]any{
-		"user_id":      userID,
-		"session_id":   sessionID,
-		"connected_at": connectedAt.UTC(),
-		"last_seen_at": lastSeenAt.UTC(),
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	_ = h.redis.Set(ctx, key, data, 90*time.Second).Err()
 }
 
 func (h *Handler) sendJSON(client *Client, v any) {

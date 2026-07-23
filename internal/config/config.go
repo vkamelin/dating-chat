@@ -25,11 +25,14 @@ type Config struct {
 	AuthJWTAudience      string
 	AuthJWTClockSkew     int
 
-	WSMaxMessageBytes      int64
+	WSMaxMessageBytes       int64
 	WSPingIntervalSeconds   int
 	WSPongTimeoutSeconds    int
-	ChatMessageMaxLength    int
-	ChatMessageRatePerMin   int
+	PresenceTTLSeconds       int
+	PresenceHeartbeatSeconds int
+	PresenceChannel          string
+	ChatMessageMaxLength     int
+	ChatMessageRatePerMin    int
 }
 
 func Load() (Config, error) {
@@ -47,11 +50,14 @@ func Load() (Config, error) {
 		AuthJWTIssuer:         getenv("AUTH_JWT_ISSUER", ""),
 		AuthJWTAudience:       getenv("AUTH_JWT_AUDIENCE", ""),
 		AuthJWTClockSkew:      getenvInt("AUTH_JWT_CLOCK_SKEW", 30),
-		WSMaxMessageBytes:     getenvInt64("WS_MAX_MESSAGE_BYTES", 65536),
+		WSMaxMessageBytes:       getenvInt64("WS_MAX_MESSAGE_BYTES", 65536),
 		WSPingIntervalSeconds:  getenvInt("WS_PING_INTERVAL_SECONDS", 25),
 		WSPongTimeoutSeconds:   getenvInt("WS_PONG_TIMEOUT_SECONDS", 60),
-		ChatMessageMaxLength:   getenvInt("CHAT_MESSAGE_MAX_LENGTH", 4000),
-		ChatMessageRatePerMin:  getenvInt("CHAT_MESSAGE_RATE_LIMIT_PER_MINUTE", 60),
+		PresenceTTLSeconds:       getenvInt("PRESENCE_TTL_SECONDS", 90),
+		PresenceHeartbeatSeconds: getenvInt("PRESENCE_HEARTBEAT_SECONDS", 30),
+		PresenceChannel:          getenv("PRESENCE_EVENTS_CHANNEL", "chat.presence"),
+		ChatMessageMaxLength:     getenvInt("CHAT_MESSAGE_MAX_LENGTH", 4000),
+		ChatMessageRatePerMin:    getenvInt("CHAT_MESSAGE_RATE_LIMIT_PER_MINUTE", 60),
 	}
 
 	if cfg.MySQLDSN == "" {
@@ -62,6 +68,9 @@ func Load() (Config, error) {
 	}
 	if cfg.WSPongTimeoutSeconds <= 0 {
 		return Config{}, fmt.Errorf("WS_PONG_TIMEOUT_SECONDS must be positive")
+	}
+	if cfg.PresenceTTLSeconds <= 0 || cfg.PresenceHeartbeatSeconds <= 0 || cfg.PresenceHeartbeatSeconds >= cfg.PresenceTTLSeconds {
+		return Config{}, fmt.Errorf("presence heartbeat must be positive and shorter than presence TTL")
 	}
 	if cfg.ChatMessageMaxLength <= 0 {
 		return Config{}, fmt.Errorf("CHAT_MESSAGE_MAX_LENGTH must be positive")

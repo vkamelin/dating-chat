@@ -196,6 +196,31 @@ func (r *Repository) LoadChatParticipants(ctx context.Context, chatID uint64) ([
 	return ids, rows.Err()
 }
 
+// LoadPresenceRecipients returns only users who may see the caller's presence.
+func (r *Repository) LoadPresenceRecipients(ctx context.Context, userID uint64) ([]uint64, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT DISTINCT p_other.user_id
+		FROM chats c
+		INNER JOIN chat_participants p_me ON p_me.chat_id = c.id AND p_me.user_id = ?
+		INNER JOIN chat_participants p_other ON p_other.chat_id = c.id AND p_other.user_id <> ?
+		WHERE c.status IN ('active', 'date_suggested', 'warning_inactive')
+	`, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []uint64
+	for rows.Next() {
+		var id uint64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *Repository) InsertUserMessage(ctx context.Context, tx *sql.Tx, chat Chat, senderUserID uint64, clientMessageID, body string, sequenceNumber uint64) (*Message, error) {
 	now := time.Now().UTC()
 	res, err := tx.ExecContext(ctx, `
