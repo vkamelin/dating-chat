@@ -77,37 +77,40 @@ func (a *Authenticator) Authenticate(ctx context.Context, tokenString string) (I
 
 	now := time.Now().UTC()
 	if claims.Subject == "" {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT subject is missing")
 	}
 	if claims.ExpiresAt == nil || claims.IssuedAt == nil {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT issued-at or expiry claim is missing")
 	}
 	if claims.Issuer != a.issuer {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT issuer does not match configuration")
 	}
 	if len(claims.Audience) != 1 || claims.Audience[0] != a.audience {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT audience does not match configuration")
 	}
 	issuedAt := claims.IssuedAt.Time.UTC().Unix()
 	tokenExpiresAt := claims.ExpiresAt.Time.UTC().Unix()
 	nowUnix := now.Unix()
 	skew := int64(a.clockSkew / time.Second)
 	if issuedAt > nowUnix+skew {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT issued-at time is in the future")
 	}
 	if tokenExpiresAt <= nowUnix-skew {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT has expired")
 	}
 	if tokenExpiresAt <= issuedAt {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT expiry is not after issued-at time")
 	}
 	if strings.TrimSpace(claims.SID) == "" {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("JWT session ID is missing")
 	}
 
 	userID, err := parseUint(claims.Subject)
-	if err != nil || userID == 0 {
+	if err != nil {
 		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
+	}
+	if userID == 0 {
+		return Identity{}, invalid("JWT subject must be greater than zero")
 	}
 
 	var sessionUserID uint64
@@ -126,13 +129,13 @@ func (a *Authenticator) Authenticate(ctx context.Context, tokenString string) (I
 		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 	}
 	if revokedAt.Valid {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("session is revoked")
 	}
 	if !sessionExpiresAt.After(now) {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("session has expired")
 	}
 	if sessionUserID != userID {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("session does not belong to JWT subject")
 	}
 
 	var userStatus string
@@ -149,7 +152,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, tokenString string) (I
 		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", err)
 	}
 	if strings.ToLower(userStatus) != "active" {
-		return Identity{}, NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", nil)
+		return Identity{}, invalid("user profile is not active")
 	}
 
 	return Identity{UserID: userID, SessionID: claims.SID}, nil
@@ -202,4 +205,8 @@ func (e *Error) Unwrap() error { return e.Err }
 
 func NewError(code, message string, err error) *Error {
 	return &Error{Code: code, Message: message, Err: err}
+}
+
+func invalid(reason string) *Error {
+	return NewError("AUTH_ACCESS_TOKEN_INVALID", "Access token is invalid.", errors.New(reason))
 }
