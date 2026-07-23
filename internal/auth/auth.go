@@ -115,7 +115,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, tokenString string) (I
 	var sessionExpiresAt time.Time
 	err = a.db.QueryRowContext(ctx, `
 		SELECT user_id, expires_at, revoked_at
-		FROM user_sessions
+		FROM users_sessions
 		WHERE id = ?
 		LIMIT 1
 	`, claims.SID).Scan(&sessionUserID, &sessionExpiresAt, &revokedAt)

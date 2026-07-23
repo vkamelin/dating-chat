@@ -78,7 +78,7 @@ The token must be a JWT with `sub` and `sid` claims. The service verifies:
 3. Issuer match.
 4. Audience match.
 5. `iat` and `exp` validity with clock skew.
-6. Session existence in `user_sessions`.
+6. Session existence in `users_sessions`.
 7. Session revocation and expiration.
 8. User existence and `active` status.
 
@@ -205,7 +205,7 @@ System messages are loaded from MySQL before delivery, and buttons are expanded 
 * `id BIGINT UNSIGNED`
 * `status VARCHAR(32)`
 
-### `user_sessions`
+### `users_sessions`
 
 * `id CHAR(36)`
 * `user_id BIGINT UNSIGNED`
