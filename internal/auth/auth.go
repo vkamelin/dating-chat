@@ -137,7 +137,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, tokenString string) (I
 
 	var userStatus string
 	err = a.db.QueryRowContext(ctx, `
-		SELECT status
+		SELECT profile_status
 		FROM users
 		WHERE id = ?
 		LIMIT 1
