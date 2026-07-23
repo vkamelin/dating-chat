@@ -91,6 +91,7 @@ x-websocket-events:
     - $ref: '#/components/schemas/ChatReadOkEvent'
     - $ref: '#/components/schemas/ChatReadUpdatedEvent'
     - $ref: '#/components/schemas/ChatStatusChangedEvent'
+    - $ref: '#/components/schemas/PresenceUpdatedEvent'
     - $ref: '#/components/schemas/WsErrorEvent'
 components:
   securitySchemes:
